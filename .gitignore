@@ -1,0 +1,81 @@
+# Build directories
+build/
+bin/
+lib/
+*.exe
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# IDE / Editor
+.vscode/
+.vs/
+*.suo
+*.user
+*.sln
+*.vcxproj
+*.vcxproj.filters
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.out
+*.app
+
+# Debug files
+*.pdb
+*.ilk
+*.dSYM/
+
+# Profiling
+*.gcda
+*.gcno
+gmon.out
+perf.data*
+*.prof
+
+# Testing
+Testing/
+test_results/
+
+# Resources (large files)
+resources/tables/*.rtbw
+resources/tables/*.rtbz
+resources/*.bin
+
+# Documentation build
+docs/html/
+docs/latex/
+docs/doxygen_warnings.txt
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+
+# Logs
+*.log
+
+# Compressed files
+*.zip
+*.tar.gz
+*.7z
