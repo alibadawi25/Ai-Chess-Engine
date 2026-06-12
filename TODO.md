@@ -45,12 +45,12 @@ bash tools/build_test.sh
 4. **[FIXED — eval] Mobility was a crude centrality proxy.** Replaced with real
    pseudo-legal mobility (knights/bishops/rooks/queens), one of the highest-value
    evaluation terms.
-5. **[OPEN] Zobrist hash omits castling rights and en-passant state.** Positions
-   that differ only in castling rights / EP hash identically, allowing wrong TT
-   cutoffs. Rare but real. Deferred because the incremental `hashAfterMove` update
-   must track these perfectly or it regresses; needs careful implementation +
-   verification (Zobrist keys for 4 castle flags + 8 EP files, update on
-   king/rook moves, captures of rooks, and double-pawn pushes).
+5. **[FIXED] Zobrist hash omitted castling rights and en-passant state.**
+   Positions differing only in castling rights / EP collided in the TT. Added
+   16 castling-mask keys + 8 EP-file keys, with incremental updates in
+   `hashAfterMove` (king/rook moves, rook captures on corners, double-pawn
+   pushes). Validated by a self-check (`HASHCHECK=1`): the incrementally-updated
+   hash matched a full recompute on every tree position tested (0 mismatches).
 6. **[OPEN] Search-tree repetition only, no game-history repetition.** The engine
    cannot tell that a position already occurred earlier in the *actual game*, so
    it may shuffle into a 3-fold draw from a winning position. Pass the game's

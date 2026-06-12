@@ -17,12 +17,16 @@ class ZobristHash {
 private:
     uint64_t pieceKeys[6][2][64];  // [pieceType][color][square]
     uint64_t sideToMoveKey;
-    
+    uint64_t castlingKeys[16];     // keyed by 4-bit castling-rights mask
+    uint64_t epFileKeys[8];        // keyed by en-passant file
+
 public:
     ZobristHash();
     uint64_t computeHash(const Board* board) const;
     uint64_t getPieceKey(int type, int color, int square) const { return pieceKeys[type][color][square]; }
     uint64_t getSideKey() const { return sideToMoveKey; }
+    uint64_t getCastlingKey(int mask) const { return castlingKeys[mask & 0xF]; }
+    uint64_t getEpFileKey(int file) const { return epFileKeys[file & 7]; }
 };
 
 // ============================================================
@@ -333,6 +337,14 @@ private:
     
     // Compute incremental hash for a move (fast XOR update)
     uint64_t hashAfterMove(uint64_t hash, Board* pos, Position from, Position to) const;
+
+    // IMPROVED: castling-rights + en-passant aware hashing.
+    // boardRights() derives the 4-bit castling mask; castlingEpContribution()
+    // returns the castling+EP component; rootHash() is the full position hash
+    // (pieces+side, plus castling/EP when `improved`).
+    static int boardRights(const Board* b);
+    uint64_t castlingEpContribution(const Board* b) const;
+    uint64_t rootHash(const Board* b) const;
     
     // Knight outpost evaluation
     int evaluateKnightOutposts(Board* pos, PieceColor color);

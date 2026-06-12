@@ -8,6 +8,14 @@
 #include <random>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+
+// IMPROVED hash self-check (enable with env var HASHCHECK=1): after every legal
+// move in the tree, verify the incrementally-updated hash matches a full
+// recompute of the resulting position. Used to validate castling/EP hashing.
+static bool s_hashCheck = (std::getenv("HASHCHECK") != nullptr);
+static std::atomic<unsigned long long> s_hashChecked{0};
+static std::atomic<unsigned long long> s_hashMismatch{0};
 
 // ============================================================
 // ZOBRIST HASHING IMPLEMENTATION
@@ -20,8 +28,10 @@ ZobristHash::ZobristHash() {
         for (int c = 0; c < 2; c++)
             for (int sq = 0; sq < 64; sq++)
                 pieceKeys[pt][c][sq] = rng();
-    
+
     sideToMoveKey = rng();
+    for (int i = 0; i < 16; i++) castlingKeys[i] = rng();
+    for (int i = 0; i < 8; i++)  epFileKeys[i]   = rng();
 }
 
 uint64_t ZobristHash::computeHash(const Board* board) const {
@@ -204,6 +214,44 @@ bool Search::checkTimeLimit() {
 // actually making the move. Much faster than full recompute.
 // Note: This must match exactly what makeMove does to the board.
 // ============================================================
+// ============================================================
+// CASTLING-RIGHTS + EN-PASSANT AWARE HASHING (IMPROVED)
+// ============================================================
+// 4-bit castling-rights mask: bit0=WK(O-O), bit1=WQ(O-O-O), bit2=BK, bit3=BQ.
+// A right is present only when both king and the relevant rook are on their
+// home squares and neither has moved (matches toFEN()).
+int Search::boardRights(const Board* b) {
+    int mask = 0;
+    Piece* wk = b->getPiece(7, 4);
+    if (wk && wk->getType() == PieceType::KING && !wk->hasMovedBefore()) {
+        Piece* r = b->getPiece(7, 7);
+        if (r && r->getType() == PieceType::ROOK && !r->hasMovedBefore()) mask |= 1;
+        r = b->getPiece(7, 0);
+        if (r && r->getType() == PieceType::ROOK && !r->hasMovedBefore()) mask |= 2;
+    }
+    Piece* bk = b->getPiece(0, 4);
+    if (bk && bk->getType() == PieceType::KING && !bk->hasMovedBefore()) {
+        Piece* r = b->getPiece(0, 7);
+        if (r && r->getType() == PieceType::ROOK && !r->hasMovedBefore()) mask |= 4;
+        r = b->getPiece(0, 0);
+        if (r && r->getType() == PieceType::ROOK && !r->hasMovedBefore()) mask |= 8;
+    }
+    return mask;
+}
+
+uint64_t Search::castlingEpContribution(const Board* b) const {
+    uint64_t h = zobrist.getCastlingKey(boardRights(b));
+    Position ep = b->getEnPassantTarget();
+    if (ep.isValid()) h ^= zobrist.getEpFileKey(ep.col);
+    return h;
+}
+
+uint64_t Search::rootHash(const Board* b) const {
+    uint64_t h = zobrist.computeHash(b);
+    if (improved) h ^= castlingEpContribution(b);
+    return h;
+}
+
 uint64_t Search::hashAfterMove(uint64_t hash, Board* pos, Position from, Position to) const {
     Piece* piece = pos->getPiece(from);
     if (!piece) return hash ^ zobrist.getSideKey(); // fallback
@@ -258,9 +306,45 @@ uint64_t Search::hashAfterMove(uint64_t hash, Board* pos, Position from, Positio
         hash ^= zobrist.getPieceKey(rookPt, c, rookToSq);
     }
     
+    // IMPROVED: update castling-rights + en-passant component incrementally.
+    // The parent hash already carries the old castling/EP keys; XOR out the old
+    // component and XOR in the new one derived from the move.
+    if (improved) {
+        int oldRights = boardRights(pos);
+        Position oldEp = pos->getEnPassantTarget();
+        uint64_t oldContrib = zobrist.getCastlingKey(oldRights);
+        if (oldEp.isValid()) oldContrib ^= zobrist.getEpFileKey(oldEp.col);
+
+        // Rights lost by this move (clearing an already-absent bit is harmless).
+        int clear = 0;
+        if (piece->getType() == PieceType::KING) {
+            if (piece->getColor() == PieceColor::WHITE) clear |= (1 | 2);
+            else clear |= (4 | 8);
+        }
+        // A rook leaving — or anything capturing on — a corner kills that right.
+        auto cornerBit = [](Position p) -> int {
+            if (p.row == 7 && p.col == 7) return 1;
+            if (p.row == 7 && p.col == 0) return 2;
+            if (p.row == 0 && p.col == 7) return 4;
+            if (p.row == 0 && p.col == 0) return 8;
+            return 0;
+        };
+        clear |= cornerBit(from);
+        clear |= cornerBit(to);
+        int newRights = oldRights & ~clear;
+
+        // New en-passant square: only a pawn double-push creates one.
+        bool newEpValid = (piece->getType() == PieceType::PAWN &&
+                           std::abs(to.row - from.row) == 2);
+        uint64_t newContrib = zobrist.getCastlingKey(newRights);
+        if (newEpValid) newContrib ^= zobrist.getEpFileKey(from.col);
+
+        hash ^= oldContrib ^ newContrib;
+    }
+
     // Flip side to move
     hash ^= zobrist.getSideKey();
-    
+
     return hash;
 }
 
@@ -1610,7 +1694,14 @@ int Search::negamax(Board* pos, int depth, int alpha, int beta, int ply,
             moveIndex++;
             continue;
         }
-        
+
+        // Hash self-check: incremental childHash must equal a full recompute.
+        if (s_hashCheck) {
+            s_hashChecked.fetch_add(1, std::memory_order_relaxed);
+            if (rootHash(pos) != childHash)
+                s_hashMismatch.fetch_add(1, std::memory_order_relaxed);
+        }
+
         // ================================================================
         // MOVE EXTENSIONS
         // ================================================================
@@ -1803,7 +1894,7 @@ void Search::searchMoves(Board* pos, int maxDepth, SearchResult& result) {
         
         auto iterStart = std::chrono::high_resolution_clock::now();
         
-        uint64_t posHash = zobrist.computeHash(pos);
+        uint64_t posHash = rootHash(pos);
         int score;
         
         // ================================================================
@@ -1889,6 +1980,12 @@ void Search::searchMoves(Board* pos, int maxDepth, SearchResult& result) {
     }
     smpThreads.clear();
     
+    if (s_hashCheck) {
+        std::cerr << "[hashcheck] mismatches "
+                  << s_hashMismatch.load() << " / " << s_hashChecked.load()
+                  << " (improved=" << (improved?1:0) << ")\n";
+    }
+
     result.bestMoveFrom = bestFrom;
     result.bestMoveTo = bestTo;
     result.score = (pos->getCurrentTurn() == PieceColor::WHITE) ? bestScore : -bestScore;
@@ -1937,7 +2034,7 @@ void Search::smpHelperSearch(Board* pos, int maxDepth, int threadId) {
     // Per-thread heuristic tables (local - doesn't affect main thread's)
     // Helpers just populate the shared TT
     
-    uint64_t posHash = zobrist.computeHash(hp);
+    uint64_t posHash = rootHash(hp);
     
     // Odd threads start at depth 1, even threads start at depth 2
     // This creates depth diversity among helpers

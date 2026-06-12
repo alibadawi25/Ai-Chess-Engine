@@ -15,6 +15,12 @@ The two play each other directly via `tools/engine_test.cpp`.
    blunders).
 3. **Mate-score TT ply adjustment** — correct mate distances across the table.
 4. **Real piece mobility** in evaluation, replacing the centrality proxy.
+5. **Castling-rights + en-passant in the Zobrist hash** — previously the hash
+   ignored both, so positions differing only in castling rights / EP collided in
+   the transposition table and could produce wrong cutoffs. The incremental
+   update was validated with a built-in self-check (`HASHCHECK=1`): **0 mismatches
+   over 440k+ tree positions and across full self-play games**, including
+   castling, en passant, and rook captures.
 
 ## Correctness (perft from startpos)
 | Depth | Nodes | Expected | Status |
