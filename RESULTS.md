@@ -86,6 +86,7 @@ here so they aren't blindly re-tried):
 |:------|-------:|:-------------------|:--------|
 | Connected-rooks eval term + killer-LMR | 64 | 18–33–13 (+27) | Regressed (losses 9→13) — reverted both |
 | Killer-move LMR protection (alone) | 128 | 43–61–24 (+51) | Neutral vs the +65 bundle; win:loss ratio slipped (2.3→1.8) — reverted |
+| Contempt = 24 cp (vs the kept 12 cp) | 128 | 54–45–29 (+68) | Cut draws (58→45) but losses rose (18→29); net worse than 12 cp — kept 12 |
 
 Takeaway: the engine is already well past the point where arbitrary-weight eval
 terms or marginal LMR tweaks pay off. The remaining gains are the structural
