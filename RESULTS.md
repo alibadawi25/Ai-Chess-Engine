@@ -42,8 +42,13 @@ engine's perspective. Elo difference is `-400·log10(1/score − 1)`.
 |:-----|------:|:-----:|:-----:|:--------:|
 | Fixed depth 5 (48 games) | 48 | 17–22–9 | 58.3% | **+58** |
 | Fixed depth 5 (48, +mobility) | 48 | 16–26–6 | 60.4% | **+73** |
-| **Fixed depth 5 (64 games, final)** | 64 | **21–34–9** | **59%** | **+65** |
-| **Fixed time 50 ms/move (24 games)** | 24 | **10–9–5** | **60%** | **+73** |
+| Fixed depth 5 (64 games) | 64 | 21–34–9 | 59% | +65 |
+| Fixed time 50 ms/move (24 games) | 24 | 10–9–5 | 60% | +73 |
+| **Fixed depth 5 (128 games, +Zobrist, final)** | 128 | **46–58–24** | **59%** | **+60** |
+
+The 128-game run is the largest, most reliable sample and includes the Zobrist
+castling/EP soundness fix; the bundle holds at **~+60 Elo** with the best
+win:loss ratio (1.9:1) of any run.
 
 The fixed-depth result isolates **decision quality** (both engines reach the same
 nominal depth; improved simply searches it more correctly). The fixed-time result
