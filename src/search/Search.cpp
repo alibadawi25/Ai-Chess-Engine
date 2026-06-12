@@ -137,9 +137,9 @@ static constexpr int PHASE_ROOK = 2;
 static constexpr int PHASE_QUEEN = 4;
 static constexpr int TOTAL_PHASE = 24; // 4*1 + 4*1 + 4*2 + 2*4
 
-Search::Search(Board* boardPtr) 
-    : searching(false), stopRequested(false), board(boardPtr), 
-      nodesSearched(0), qNodesSearched(0), tt(512), timeLimitMs(0),
+Search::Search(Board* boardPtr, int ttSizeMB)
+    : searching(false), stopRequested(false), board(boardPtr),
+      nodesSearched(0), qNodesSearched(0), tt(ttSizeMB), timeLimitMs(0),
       numThreads(std::max(1, (int)std::thread::hardware_concurrency())) {
     clearHeuristics();
     // Cap SMP threads to MAX_THREADS
@@ -709,6 +709,10 @@ int Search::evaluatePosition(Board* pos) {
     int wMob = 0, bMob = 0;
     static constexpr int cB[8] = { 0, 1, 2, 3, 3, 2, 1, 0 };
 
+    // IMPROVED: real (pseudo-legal) mobility counts — far more discriminating
+    // than the centrality proxy. Counted inline during the board scan.
+    int wMobReal = 0, bMobReal = 0;
+
     // Pawn grids + knight positions for outpost evaluation
     bool wPawn[8][8] = {}, bPawn[8][8] = {};
     Position wKnts[4] = { Position(-1,-1),Position(-1,-1),Position(-1,-1),Position(-1,-1) };
@@ -788,6 +792,42 @@ int Search::evaluatePosition(Board* pos) {
                 if (isW) wMob += mob; else bMob += mob;
             }
 
+            // IMPROVED: count real pseudo-legal destinations (empty or enemy).
+            if (improved && t != PieceType::PAWN && t != PieceType::KING) {
+                int mc = 0;
+                if (t == PieceType::KNIGHT) {
+                    static constexpr int km[8][2] = {{-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1}};
+                    for (const auto& k : km) {
+                        int nr = row+k[0], nc = col+k[1];
+                        if (nr<0||nr>7||nc<0||nc>7) continue;
+                        Piece* q = pos->getPiece(nr, nc);
+                        if (!q || (q->getColor()==PieceColor::WHITE) != isW) mc++;
+                    }
+                } else {
+                    // sliders: bishop/rook/queen share ray logic
+                    static constexpr int diag[4][2]  = {{-1,-1},{-1,1},{1,-1},{1,1}};
+                    static constexpr int orth[4][2]  = {{-1,0},{1,0},{0,-1},{0,1}};
+                    bool useDiag = (t==PieceType::BISHOP || t==PieceType::QUEEN);
+                    bool useOrth = (t==PieceType::ROOK   || t==PieceType::QUEEN);
+                    for (int pass=0; pass<2; pass++) {
+                        if (pass==0 && !useDiag) continue;
+                        if (pass==1 && !useOrth) continue;
+                        const int (*dirs)[2] = (pass==0)? diag : orth;
+                        for (int di=0; di<4; di++) {
+                            for (int s=1; s<8; s++) {
+                                int nr=row+s*dirs[di][0], nc=col+s*dirs[di][1];
+                                if (nr<0||nr>7||nc<0||nc>7) break;
+                                Piece* q = pos->getPiece(nr, nc);
+                                if (!q) { mc++; continue; }
+                                if ((q->getColor()==PieceColor::WHITE) != isW) mc++;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (isW) wMobReal += mc; else bMobReal += mc;
+            }
+
             // King attack zone (tropism: enemy pieces near our king)
             if (t != PieceType::KING && t != PieceType::PAWN) {
                 if (!isW && wKing.isValid()) {
@@ -820,9 +860,15 @@ int Search::evaluatePosition(Board* pos) {
     if (wBish >= 2) { mgScore += BISHOP_PAIR_BONUS; egScore += BISHOP_PAIR_BONUS; }
     if (bBish >= 2) { mgScore -= BISHOP_PAIR_BONUS; egScore -= BISHOP_PAIR_BONUS; }
 
-    // Mobility
-    mgScore += (wMob - bMob) * MOBILITY_WEIGHT;
-    egScore += (wMob - bMob) * MOBILITY_WEIGHT;
+    // Mobility — IMPROVED uses real pseudo-legal mobility (weight 2),
+    // baseline uses the cheap centrality proxy (weight 3).
+    if (improved) {
+        mgScore += (wMobReal - bMobReal) * 2;
+        egScore += (wMobReal - bMobReal) * 2;
+    } else {
+        mgScore += (wMob - bMob) * MOBILITY_WEIGHT;
+        egScore += (wMob - bMob) * MOBILITY_WEIGHT;
+    }
 
     // King shield (middlegame only)
     mgScore += wShield - bShield;
@@ -1222,23 +1268,39 @@ int Search::generateOrderedMoves(Board* pos, int ply,
 // ============================================================
 int Search::quiescence(Board* pos, int alpha, int beta, int ply) {
     qNodesSearched.fetch_add(1, std::memory_order_relaxed);
-    
+
     if (stopRequested.load(std::memory_order_relaxed)) return 0;
     checkTimeLimit();
-    
-    // Stand-pat
-    int standPat = evaluatePosition(pos);
-    if (pos->getCurrentTurn() == PieceColor::BLACK)
-        standPat = -standPat;
-    
-    if (standPat >= beta) return beta;
-    if (standPat > alpha) alpha = standPat;
-    
-    // Generate only captures (stack-allocated, no heap)
-    ScoredMove movesBuf[128];
-    int numMoves = generateOrderedMoves(pos, ply, Position(-1,-1), Position(-1,-1), true,
+
+    // Hard ply guard: prevents unbounded recursion through forcing check
+    // sequences when evasions are searched.
+    if (ply >= MAX_PLY + 32) {
+        int e = evaluatePosition(pos);
+        return (pos->getCurrentTurn() == PieceColor::BLACK) ? -e : e;
+    }
+
+    // IMPROVED: when in check, quiescence must resolve the check by searching
+    // ALL evasions (not just captures) and must not "stand pat" — a side in
+    // check has no right to assume the static eval is a lower bound.
+    bool inCheck = improved && pos->isKingInCheck(pos->getCurrentTurn());
+
+    int standPat = 0;
+    if (!inCheck) {
+        // Stand-pat
+        standPat = evaluatePosition(pos);
+        if (pos->getCurrentTurn() == PieceColor::BLACK)
+            standPat = -standPat;
+
+        if (standPat >= beta) return beta;
+        if (standPat > alpha) alpha = standPat;
+    }
+
+    // In check: generate every move (evasions). Otherwise: captures only.
+    ScoredMove movesBuf[256];
+    int numMoves = generateOrderedMoves(pos, ply, Position(-1,-1), Position(-1,-1), !inCheck,
                                         Position(-1,-1), Position(-1,-1), movesBuf);
 
+    int legalMoves = 0;
     for (int mi = 0; mi < numMoves; mi++) {
         // Lazy selection sort: pick best remaining capture each step
         for (int mj = mi+1; mj < numMoves; mj++)
@@ -1246,12 +1308,12 @@ int Search::quiescence(Board* pos, int alpha, int beta, int ply) {
         const ScoredMove& move = movesBuf[mi];
         if (stopRequested.load()) return 0;
 
-        // Delta pruning
+        // Delta / SEE pruning — only when NOT in check (never prune evasions)
         Piece* captured = pos->getPiece(move.to);
-        if (captured) {
+        if (!inCheck && captured) {
             int delta = standPat + pieceValue(captured->getType()) + 200;
             if (delta < alpha) continue;
-            
+
             // SEE pruning: skip losing captures (attacker > victim → call SEE)
             Piece* capMover = pos->getPiece(move.from);
             if (capMover && pieceValue(capMover->getType()) > pieceValue(captured->getType())) {
@@ -1260,23 +1322,27 @@ int Search::quiescence(Board* pos, int alpha, int beta, int ply) {
                 }
             }
         }
-        
+
         UndoInfo undo = pos->makeMove(move.from, move.to);
-        
+
         // Legality check: if our king is now in check, this was illegal
         PieceColor us = pos->getCurrentTurn() == PieceColor::WHITE ? PieceColor::BLACK : PieceColor::WHITE;
         if (pos->isKingInCheck(us)) {
             pos->unmakeMove(undo);
             continue;
         }
-        
+        legalMoves++;
+
         int score = -quiescence(pos, -beta, -alpha, ply + 1);
         pos->unmakeMove(undo);
-        
+
         if (score >= beta) return beta;
         if (score > alpha) alpha = score;
     }
-    
+
+    // In check with no legal evasion → checkmate.
+    if (inCheck && legalMoves == 0) return -100000 + ply;
+
     return alpha;
 }
 
@@ -1318,6 +1384,12 @@ int Search::negamax(Board* pos, int depth, int alpha, int beta, int ply,
     if (ttEntry) {
         if (ttEntry->depth >= depth) {
             int ttScore = ttEntry->score;
+            // IMPROVED: mate scores are stored relative to the storing node;
+            // translate them back to be relative to the current ply.
+            if (improved) {
+                if (ttScore > 90000)      ttScore -= ply;
+                else if (ttScore < -90000) ttScore += ply;
+            }
             // Don't use TT cutoffs in singular extension search or PV nodes
             if (!isPV && !excludeFrom.isValid()) {
                 if (ttEntry->getFlag() == TTFlag::EXACT) return ttScore;
@@ -1670,9 +1742,16 @@ int Search::negamax(Board* pos, int depth, int alpha, int beta, int ply,
     
     // Store in TT
     if (!stopRequested.load() && bestFrom.isValid()) {
-        tt.store(posHash, bestScore, depth, ttFlag, bestFrom, bestTo);
+        int storeScore = bestScore;
+        // IMPROVED: store mate scores relative to this node (add the plies it
+        // took to reach here) so retrieval at other depths is distance-correct.
+        if (improved) {
+            if (storeScore > 90000)      storeScore += ply;
+            else if (storeScore < -90000) storeScore -= ply;
+        }
+        tt.store(posHash, storeScore, depth, ttFlag, bestFrom, bestTo);
     }
-    
+
     return bestScore;
 }
 
@@ -1680,6 +1759,10 @@ int Search::negamax(Board* pos, int depth, int alpha, int beta, int ply,
 // ITERATIVE DEEPENING SEARCH
 // ============================================================
 void Search::searchMoves(Board* pos, int maxDepth, SearchResult& result) {
+    // Reset the stop flag: it is raised at the end of every search (to halt SMP
+    // helpers). Without this reset the synchronous getBestMove()/getBestMoveTimed()
+    // API would bail out immediately on the second and subsequent calls.
+    stopRequested.store(false, std::memory_order_relaxed);
     nodesSearched.store(0, std::memory_order_relaxed);
     qNodesSearched.store(0, std::memory_order_relaxed);
     clearHeuristics();
@@ -1835,7 +1918,7 @@ void Search::searchMoves(Board* pos, int maxDepth, SearchResult& result) {
     std::cout << "TT hits: " << tt.getHits() << " / " << tt.getProbes() << " probes\n";
     std::cout << "Time taken: " << duration.count() << " ms\n";
     uint64_t totalNodes = finalNodes + finalQNodes;
-    double nps = totalNodes * 1000.0 / std::max((long long)1, duration.count());
+    double nps = totalNodes * 1000.0 / std::max((long long)1, (long long)duration.count());
     std::cout << "Nodes/second: " << std::fixed << std::setprecision(0) << nps << "\n";
     std::cout << "Threads used: " << numThreads << "\n";
     std::cout << "========================================\n\n";

@@ -338,8 +338,13 @@ private:
     int evaluateKnightOutposts(Board* pos, PieceColor color);
     
 public:
-    Search(Board* boardPtr);
+    Search(Board* boardPtr, int ttSizeMB = 512);
     ~Search();
+
+    // A/B testing flag: when true, enables experimental strength improvements.
+    // Lets a single binary play "baseline" vs "improved" engines head-to-head.
+    bool improved = false;
+    void setImproved(bool b) { improved = b; }
     
     void startSearch(int maxDepth, std::function<void(SearchResult)> callback);
     void startSearchTimed(int timeLimitMs, std::function<void(SearchResult)> callback);
