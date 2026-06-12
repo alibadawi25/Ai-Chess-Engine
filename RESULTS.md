@@ -37,12 +37,14 @@ engine's perspective. Elo difference is `-400·log10(1/score − 1)`.
 | Fixed depth 5 (48 games) | 48 | 17–22–9 | 58.3% | **+58** |
 | Fixed depth 5 (48, +mobility) | 48 | 16–26–6 | 60.4% | **+73** |
 | **Fixed depth 5 (64 games, final)** | 64 | **21–34–9** | **59%** | **+65** |
-| Fixed time 50 ms/move (24 games) | 24 | _pending_ | _pending_ | _pending_ |
+| **Fixed time 50 ms/move (24 games)** | 24 | **10–9–5** | **60%** | **+73** |
 
 The fixed-depth result isolates **decision quality** (both engines reach the same
 nominal depth; improved simply searches it more correctly). The fixed-time result
-is the fair-resource check: even though improved is slower per node, does it still
-win when both get the same wall-clock per move?
+is the fair-resource check, and improved **still wins (+73 Elo, 10–9–5)** when both
+get the same wall-clock per move — so the gain is genuine strength, not just extra
+nodes spent. Across both regimes the improved engine is roughly **+65 to +73 Elo**
+stronger than the saved baseline.
 
 ## Speed — single-thread node throughput (startpos, depth 10)
 | Engine | Nodes | Time | Nodes/s |
