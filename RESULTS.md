@@ -15,6 +15,11 @@ The two play each other directly via `tools/engine_test.cpp`.
    blunders).
 3. **Mate-score TT ply adjustment** — correct mate distances across the table.
 4. **Real piece mobility** in evaluation, replacing the centrality proxy.
+5. **Castling rights + en-passant in the Zobrist hash** — sound TT keys
+   (validated by an exact-recompute self-check, 0 mismatches).
+6. **Contempt (12 cp)** — draws (repetition / stalemate) are scored slightly
+   negative for the side to move, so the engine plays on for a win in equal-or-
+   better positions instead of acquiescing to a repetition.
 5. **Castling-rights + en-passant in the Zobrist hash** — previously the hash
    ignored both, so positions differing only in castling rights / EP collided in
    the transposition table and could produce wrong cutoffs. The incremental
@@ -44,11 +49,14 @@ engine's perspective. Elo difference is `-400·log10(1/score − 1)`.
 | Fixed depth 5 (48, +mobility) | 48 | 16–26–6 | 60.4% | **+73** |
 | Fixed depth 5 (64 games) | 64 | 21–34–9 | 59% | +65 |
 | Fixed time 50 ms/move (24 games) | 24 | 10–9–5 | 60% | +73 |
-| **Fixed depth 5 (128 games, +Zobrist, final)** | 128 | **46–58–24** | **59%** | **+60** |
+| Fixed depth 5 (128 games, +Zobrist) | 128 | 46–58–24 | 59% | +60 |
+| **Fixed depth 5 (128 games, +contempt, final)** | 128 | **52–58–18** | **63%** | **+94** |
 
-The 128-game run is the largest, most reliable sample and includes the Zobrist
-castling/EP soundness fix; the bundle holds at **~+60 Elo** with the best
-win:loss ratio (1.9:1) of any run.
+Each row adds the next change on top of the previous. The Zobrist fix held the
+bundle at ~+60 with no regression; adding a 12 cp contempt jumped it to **+94 Elo**
+— wins rose (46→52) and losses fell (24→18), sharpening the decisive ratio to
+2.9:1. (Draw count was unchanged at 58; contempt converted near-draw decisive
+games rather than removing draws outright.)
 
 The fixed-depth result isolates **decision quality** (both engines reach the same
 nominal depth; improved simply searches it more correctly). The fixed-time result

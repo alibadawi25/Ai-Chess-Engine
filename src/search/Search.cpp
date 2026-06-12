@@ -137,6 +137,7 @@ static constexpr int MOBILITY_WEIGHT = 3;           // centipawns per legal move
 static constexpr int KING_SHIELD_BONUS = 10;         // per pawn in front of king
 static constexpr int KNIGHT_OUTPOST_BONUS = 25;      // knight on outpost square
 static constexpr int TEMPO_BONUS = 10;               // bonus for side to move
+static constexpr int CONTEMPT = 12;                  // IMPROVED: draw aversion (cp)
 static constexpr int KING_ATTACK_WEIGHT = 4;         // per attacker in king zone
 static constexpr int CONNECTED_ROOKS_BONUS = 15;     // rooks on same rank/file with nothing between
 
@@ -1453,7 +1454,8 @@ int Search::negamax(Board* pos, int depth, int alpha, int beta, int ply,
     searchHashes[ply] = posHash;
     if (ply >= 2) {
         for (int i = ply - 2; i >= 0; i -= 2) {
-            if (searchHashes[i] == posHash) return 0; // Draw by repetition
+            if (searchHashes[i] == posHash)            // Draw by repetition
+                return improved ? -CONTEMPT : 0;       // IMPROVED: avoid draws when ~equal
         }
     }
     
@@ -1828,7 +1830,7 @@ int Search::negamax(Board* pos, int depth, int alpha, int beta, int ply,
     // If no legal moves were found, it's checkmate or stalemate
     if (movesSearched == 0) {
         if (inCheck) return -100000 + ply; // Checkmate
-        return 0; // Stalemate
+        return improved ? -CONTEMPT : 0; // Stalemate (IMPROVED: slight draw aversion)
     }
     
     // Store in TT
