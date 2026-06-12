@@ -58,6 +58,21 @@ nodes/second drop comes from the real-mobility evaluation. Net effect is positiv
 (see strength table). The largest remaining speed lever is replacing the
 object-oriented board with bitboards — see `TODO.md` (#8).
 
+## Small tweaks that were tested and rejected
+
+Measured, found not to help on top of the bundle above, and **reverted** (kept
+here so they aren't blindly re-tried):
+
+| Tweak | Sample | Result vs baseline | Verdict |
+|:------|-------:|:-------------------|:--------|
+| Connected-rooks eval term + killer-LMR | 64 | 18–33–13 (+27) | Regressed (losses 9→13) — reverted both |
+| Killer-move LMR protection (alone) | 128 | 43–61–24 (+51) | Neutral vs the +65 bundle; win:loss ratio slipped (2.3→1.8) — reverted |
+
+Takeaway: the engine is already well past the point where arbitrary-weight eval
+terms or marginal LMR tweaks pay off. The remaining gains are the structural
+items in `TODO.md` (bitboard board, Zobrist castling/EP soundness, pawn-hash /
+lazy eval), not micro-tweaks.
+
 ## Reproduce
 ```bash
 bash tools/build_test.sh
