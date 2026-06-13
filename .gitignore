@@ -81,3 +81,4 @@ desktop.ini
 *.zip
 *.tar.gz
 *.7z
+build_uci/

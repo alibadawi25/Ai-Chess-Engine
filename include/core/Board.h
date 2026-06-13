@@ -109,6 +109,10 @@ public:
     
     // Generate FEN string for opening book lookup
     std::string toFEN() const;
+
+    // Parse a FEN string and set up the board (placement, side, castling, EP).
+    // Returns false on malformed input. Used by the UCI front-end.
+    bool loadFEN(const std::string& fen);
 };
 
 #endif

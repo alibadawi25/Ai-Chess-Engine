@@ -2,6 +2,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <sstream>
 
 Board::Board() : currentTurn(PieceColor::WHITE), enPassantTarget(-1, -1),
                  whiteKingPos(7, 4), blackKingPos(0, 4), inCheckTest(false), positionHash(0),
@@ -606,6 +607,77 @@ void Board::unmakeMove(UndoInfo& undo) {
     enPassantTarget = undo.oldEnPassant;
     whiteKingPos = undo.oldWhiteKingPos;
     blackKingPos = undo.oldBlackKingPos;
+}
+
+bool Board::loadFEN(const std::string& fen) {
+    // Tokenise: placement, side, castling, ep [halfmove fullmove ignored]
+    std::istringstream ss(fen);
+    std::string placement, side, castling, ep;
+    if (!(ss >> placement >> side)) return false;
+    if (!(ss >> castling)) castling = "-";
+    if (!(ss >> ep)) ep = "-";
+
+    // Clear board + state.
+    for (int i = 0; i < 8; i++)
+        for (int j = 0; j < 8; j++)
+            squares[i][j] = nullptr;
+    moveHistory.clear();
+    enPassantTarget = Position(-1, -1);
+    positionHash = 0;
+    inCheckTest = false;
+    whiteNonPawn = blackNonPawn = 0;
+
+    // Placement: rank 8 (row 0) down to rank 1 (row 7).
+    int row = 0, col = 0;
+    for (char c : placement) {
+        if (c == '/') { row++; col = 0; continue; }
+        if (c >= '1' && c <= '8') { col += c - '0'; continue; }
+        if (row > 7 || col > 7) return false;
+        PieceColor color = (c >= 'a') ? PieceColor::BLACK : PieceColor::WHITE;
+        char u = (c >= 'a') ? c - 32 : c;
+        Position pos(row, col);
+        switch (u) {
+            case 'P': squares[row][col] = std::make_unique<Pawn>(color, pos); break;
+            case 'N': squares[row][col] = std::make_unique<Knight>(color, pos); break;
+            case 'B': squares[row][col] = std::make_unique<Bishop>(color, pos); break;
+            case 'R': squares[row][col] = std::make_unique<Rook>(color, pos); break;
+            case 'Q': squares[row][col] = std::make_unique<Queen>(color, pos); break;
+            case 'K': squares[row][col] = std::make_unique<King>(color, pos);
+                      if (color == PieceColor::WHITE) whiteKingPos = pos; else blackKingPos = pos;
+                      break;
+            default: return false;
+        }
+        // Castling rights are encoded via hasMoved on kings/rooks below; mark
+        // every king/rook as "moved" by default, then clear for granted rights.
+        if (u == 'R' || u == 'K') squares[row][col]->setMoved(true);
+        if (u != 'P' && u != 'K') {
+            if (color == PieceColor::WHITE) whiteNonPawn++; else blackNonPawn++;
+        }
+        col++;
+    }
+
+    currentTurn = (side == "b") ? PieceColor::BLACK : PieceColor::WHITE;
+
+    // Castling field -> clear hasMoved on the relevant king/rook so it may castle.
+    auto grant = [&](int kr, int kc, int rr, int rc) {
+        Piece* k = squares[kr][kc].get();
+        Piece* r = squares[rr][rc].get();
+        if (k && k->getType() == PieceType::KING) k->setMoved(false);
+        if (r && r->getType() == PieceType::ROOK) r->setMoved(false);
+    };
+    if (castling.find('K') != std::string::npos) grant(7, 4, 7, 7);
+    if (castling.find('Q') != std::string::npos) grant(7, 4, 7, 0);
+    if (castling.find('k') != std::string::npos) grant(0, 4, 0, 7);
+    if (castling.find('q') != std::string::npos) grant(0, 4, 0, 0);
+
+    // En-passant target square (e.g. "e3").
+    if (ep != "-" && ep.size() >= 2) {
+        int ecol = ep[0] - 'a';
+        int erow = 8 - (ep[1] - '0');
+        if (ecol >= 0 && ecol < 8 && erow >= 0 && erow < 8)
+            enPassantTarget = Position(erow, ecol);
+    }
+    return true;
 }
 
 std::string Board::toFEN() const {
