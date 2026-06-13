@@ -130,7 +130,8 @@ static const char* OPENINGS[] = {
 };
 
 int g_lastPlies = 0; const char* g_lastReason = "?";
-bool g_useTime = false; int g_budget = 5;  // g_budget = depth (plies) or time (ms)
+bool g_useTime = false; bool g_useNodes = false;
+int g_budget = 5;  // g_budget = depth (plies) | time (ms) | node count
 // Returns: 1 = white mated black, -1 = black mated white, 0 = draw.
 static int playGame(const std::string& opening, int depth,
                     Search& whiteEng, Search& blackEng, Board& b) {
@@ -165,8 +166,9 @@ static int playGame(const std::string& opening, int depth,
 
         Search& eng = (side == PieceColor::WHITE) ? whiteEng : blackEng;
         SearchResult r;
-        { CoutMute m; r = g_useTime ? eng.getBestMoveTimed(g_budget)
-                                    : eng.getBestMove(depth); }
+        { CoutMute m; r = g_useNodes ? eng.getBestMoveNodes((uint64_t)g_budget)
+                                     : g_useTime ? eng.getBestMoveTimed(g_budget)
+                                                 : eng.getBestMove(depth); }
         if (!r.bestMoveFrom.isValid() || !r.bestMoveTo.isValid()) {
             g_lastReason = "no-move"; return 0; // safety
         }
@@ -203,8 +205,9 @@ static int cmd_selfplay(int depth, int games) {
     int played = 0;
 
     std::cout << "Self-play: IMPROVED vs BASELINE, "
-              << (g_useTime ? (std::to_string(g_budget)+"ms/move")
-                            : ("depth "+std::to_string(depth)))
+              << (g_useNodes ? (std::to_string(g_budget)+" nodes/move")
+                 : g_useTime ? (std::to_string(g_budget)+"ms/move")
+                             : ("depth "+std::to_string(depth)))
               << ", up to " << games << " games\n";
     std::cout << "Opening lines: " << nOpen << " (each played both colors)\n\n";
 
@@ -263,6 +266,11 @@ int main(int argc, char** argv) {
         g_useTime = true;
         g_budget = argc>2?std::stoi(argv[2]):100; // ms per move
         return cmd_selfplay(64, argc>3?std::stoi(argv[3]):32);
+    }
+    if (cmd == "selfplaynodes") {
+        g_useNodes = true;
+        g_budget = argc>2?std::stoi(argv[2]):200000; // nodes per move
+        return cmd_selfplay(64, argc>3?std::stoi(argv[3]):64);
     }
     std::cerr << "unknown command: " << cmd << "\n";
     return 1;

@@ -251,6 +251,7 @@ private:
     // Time management
     std::chrono::high_resolution_clock::time_point searchStartTime;
     int timeLimitMs;       // 0 = no time limit (use maxDepth only)
+    uint64_t nodeLimit = 0; // 0 = no node limit (fixed-nodes search when > 0)
     bool checkTimeLimit(); // Returns true if time is up
     
     // Zobrist hashing & transposition table (shared across SMP threads)
@@ -364,6 +365,7 @@ public:
     bool isSearching() const { return searching.load(); }
     SearchResult getBestMove(int maxDepth);
     SearchResult getBestMoveTimed(int timeLimitMs);
+    SearchResult getBestMoveNodes(uint64_t maxNodes);
     void setThreadCount(int n) { numThreads = std::max(1, std::min(n, MAX_THREADS)); }
     int getThreadCount() const { return numThreads; }
 };

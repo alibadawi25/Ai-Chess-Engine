@@ -194,12 +194,18 @@ void Search::storeCountermove(Position prevFrom, Position prevTo, Position from,
 // TIME MANAGEMENT
 // ============================================================
 bool Search::checkTimeLimit() {
+    // Node limit (speed-independent, deterministic) — checked cheaply every call.
+    if (nodeLimit > 0) {
+        uint64_t tot = nodesSearched.load(std::memory_order_relaxed) +
+                       qNodesSearched.load(std::memory_order_relaxed);
+        if (tot >= nodeLimit) { stopRequested.store(true); return true; }
+    }
     if (timeLimitMs <= 0) return false;
     // Only check every 4096 nodes to avoid clock overhead
-    uint64_t total = nodesSearched.load(std::memory_order_relaxed) + 
+    uint64_t total = nodesSearched.load(std::memory_order_relaxed) +
                      qNodesSearched.load(std::memory_order_relaxed);
     if ((total & 4095) != 0) return false;
-    
+
     auto now = std::chrono::high_resolution_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - searchStartTime).count();
     if (elapsed >= timeLimitMs) {
@@ -2121,5 +2127,16 @@ SearchResult Search::getBestMoveTimed(int timeMs) {
     timeLimitMs = timeMs;
     SearchResult result;
     searchMoves(board, 64, result);
+    return result;
+}
+
+// Fixed-nodes search: deterministic and speed-independent — the fairest way to
+// compare decision quality between engine variants (no clock, no nps bias).
+SearchResult Search::getBestMoveNodes(uint64_t maxNodes) {
+    timeLimitMs = 0;
+    nodeLimit = maxNodes;
+    SearchResult result;
+    searchMoves(board, 64, result);
+    nodeLimit = 0;
     return result;
 }
