@@ -129,6 +129,43 @@ static const char* OPENINGS[] = {
     "d2d4 d7d5 c2c4 c7c6",
 };
 
+// ---- depth benchmark: how deep in a given time budget --------------------
+static void applyLine(Board& b, const std::string& line) {
+    std::istringstream iss(line); std::string mv;
+    while (iss >> mv) { CoutMute m; b.movePiece(uciToPos(mv.substr(0,2)), uciToPos(mv.substr(2,2))); }
+}
+static int cmd_depthbench(int ms) {
+    struct Pos { const char* name; const char* line; };
+    Pos positions[] = {
+        { "startpos", "" },
+        { "Ruy Lopez middlegame", "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7 f1e1 b7b5 a4b3 d7d6 c2c3 e8g8" },
+    };
+    int threadOpts[] = { 1, 4 };
+    std::cout << "Depth reached in " << ms << " ms/move (Lazy SMP):\n\n";
+    for (auto& P : positions) {
+        std::cout << "  " << P.name << ":\n";
+        for (int improved = 0; improved <= 1; improved++) {
+            for (int th : threadOpts) {
+                Board b; b.initialize(); applyLine(b, P.line);
+                Search s(&b, 256);
+                s.setThreadCount(th);
+                s.setImproved(improved != 0);
+                SearchResult r;
+                { CoutMute m; r = s.getBestMoveTimed(ms); }
+                std::cout << "    " << (improved?"IMPROVED":"BASELINE")
+                          << "  " << th << " thread" << (th>1?"s":" ")
+                          << "  ->  depth " << r.depth
+                          << "   (" << r.nodesSearched << " main nodes, best "
+                          << posToUci(r.bestMoveFrom) << posToUci(r.bestMoveTo) << ")\n";
+            }
+        }
+        std::cout << "\n";
+    }
+    return 0;
+}
+
+static int cmd_selfplay(int depth, int games);
+
 int g_lastPlies = 0; const char* g_lastReason = "?";
 bool g_useTime = false; bool g_useNodes = false;
 int g_budget = 5;  // g_budget = depth (plies) | time (ms) | node count
@@ -258,6 +295,7 @@ int main(int argc, char** argv) {
     }
     std::string cmd = argv[1];
     if (cmd == "perft")    return cmd_perft(argc>2?std::stoi(argv[2]):5);
+    if (cmd == "depthbench") return cmd_depthbench(argc>2?std::stoi(argv[2]):3000);
     if (cmd == "bench")    return cmd_bench(argc>2?std::stoi(argv[2]):8,
                                             argc>3?(std::string(argv[3])=="improved"):false);
     if (cmd == "selfplay") return cmd_selfplay(argc>2?std::stoi(argv[2]):4,
