@@ -80,12 +80,27 @@ bash tools/build_test.sh
 - Verified move-gen correctness (perft 1–5 exact) and measured strength via
   self-play. See `RESULTS.md` for the numbers and the comparison table.
 
+## Measurement note (learned this pass)
+Fixed-depth self-play flatters changes that spend more time per depth. The
+improved bundle is +94 at fixed depth but only +32 at fixed nodes and *negative*
+at a 60 ms fixed-time control — because real-mobility eval (~17% slower nps) and
+quiescence evasions cost nodes. Always sanity-check strength changes at fixed
+**nodes** (`selfplaynodes`), not just fixed depth, and remember the GUI plays at
+3–8 s/move where depth saturates. See `RESULTS.md` → "Three measurement lenses".
+
 ## Remaining (recommended order)
-1. Bitboard board representation (#8) — largest Elo/throughput win.
-2. Zobrist castling + EP correctness (#5).
-3. Game-history repetition detection (#6).
-4. Pawn hash + lazy eval (#9).
-5. Per-thread heuristic tables for SMP (#10).
-6. Underpromotion support (#7).
-7. Tune eval weights and search parameters with a larger self-play gauntlet
-   (the current LMR divisor of 1.4 is very aggressive; worth A/B testing).
+1. **Pawn hash + lazy eval (#9)** — now the top lever: cutting per-node eval cost
+   turns the existing quality gains into wins at fast time controls too (the
+   mobility term is the main culprit behind the fixed-time regression).
+2. Bitboard board representation (#8) — largest raw-throughput win.
+3. Per-thread heuristic tables for SMP (#10).
+4. Underpromotion support (#7).
+5. Larger self-play gauntlet for eval/search tuning — at fixed nodes/time.
+
+## Experiments tested and rejected (don't re-try blindly)
+- Connected-rooks eval term + killer-LMR: regressed (reverted).
+- Killer-move LMR protection alone: neutral over 128 games (reverted).
+- Contempt 24 cp: worse than 12 cp (kept 12).
+- Game-history repetition detection: neutral on top of contempt (reverted).
+- Softer LMR divisor 1.9: −34 at fixed time (2.4× node cost; reverted).
+See `RESULTS.md` for the per-experiment W–D–L.

@@ -65,6 +65,32 @@ get the same wall-clock per move — so the gain is genuine strength, not just e
 nodes spent. Across both regimes the improved engine is roughly **+65 to +73 Elo**
 stronger than the saved baseline.
 
+## Three measurement lenses (important nuance)
+
+The same bundle measured three ways, because *how* you equalize the two engines
+changes what you learn:
+
+| Lens | Result (improved vs baseline) | Isolates |
+|:-----|:------------------------------|:---------|
+| Fixed **depth** 5 (128 g) | **+94 Elo** (52–58–18) | accuracy per nominal depth |
+| Fixed **nodes** 50k (32 g) | **+32 Elo** (13–9–10) | pure decision quality, speed-independent |
+| Fixed **time** 60 ms (30 g) | **−46 Elo** (10–6–14) | wall-clock at a *very fast* control |
+
+Interpretation: the improvements make the engine **more accurate per depth and
+per node** (both positive). But the real-mobility evaluation costs ~17%
+nodes/second, and quiescence check-evasions add nodes, so the improved engine
+reaches *less nominal depth in the same wall-clock*. At a 60 ms control that
+depth deficit dominates and improved loses; at fixed depth/nodes (where the
+deficit is removed) it clearly wins. The GUI's real controls are 3–8 **seconds**
+per move, where depth saturates and quality should dominate — but that regime is
+too slow to measure with a self-play gauntlet here.
+
+Practical takeaway: the **next** highest-value work is cutting per-node eval cost
+(pawn hash + lazy eval — `TODO.md` #9) so the quality gains also pay off at fast
+time controls, and ultimately the bitboard rewrite (#8). Contempt, the mate-TT
+fix, the Zobrist fix and the quiescence-in-check fix are all either free or pure
+correctness and help at every time control.
+
 ## Speed — single-thread node throughput (startpos, depth 10)
 | Engine | Nodes | Time | Nodes/s |
 |:-------|------:|-----:|--------:|
@@ -100,6 +126,7 @@ bash tools/build_test.sh
 ./build_test/engine_test perft 5
 ./build_test/engine_test bench 10            # baseline
 ./build_test/engine_test bench 10 improved   # improved
-./build_test/engine_test selfplay 5 64       # fixed-depth match
-./build_test/engine_test selfplaytime 50 24  # fixed-time match
+./build_test/engine_test selfplay 5 64        # fixed-depth match
+./build_test/engine_test selfplaytime 50 24   # fixed-time match
+./build_test/engine_test selfplaynodes 50000 32  # fixed-nodes (speed-independent)
 ```
